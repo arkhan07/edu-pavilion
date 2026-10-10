@@ -3,16 +3,16 @@
 Kirim setelah server production siap (lihat [PRODUCTION.md](PRODUCTION.md) langkah 1-2), supaya IP dan URL yang dikirim sudah final dan bisa langsung diuji Espay.
 
 - Kepada: tim integrasi / onboarding Espay (`sgolive@espay.id`, cc PIC Espay)
-- Lampiran: file public key merchant production (`.pem` atau teks), hasil uji UAT & Functional Test sandbox
+- Lampiran: file public key merchant production (`.pem` atau teks), UAT Script (ditandatangani), Functional Test PG & Disbursement, Panduan SOP dan Matriks Penjelasan (ditandatangani)
 
 ## Checklist sebelum kirim
 
-- [ ] Domain production aktif dengan SSL valid
-- [ ] URL callback menjawab JSON 401 untuk signature salah (PRODUCTION.md langkah 1.8)
-- [ ] IP publik server production sudah dicatat
+- [x] Domain production aktif dengan SSL valid (https://edupavilion.com)
+- [x] URL callback menjawab JSON 401 untuk signature salah (dicek 10-10-2026)
+- [x] IP publik server production: 103.245.39.23
 - [ ] Public key merchant production sudah dibuat (pasangan baru, bukan key sandbox)
 - [ ] Cron `schedule:run` aktif
-- [ ] Email Customer Service sudah ditentukan
+- [x] Email Customer Service: info@edupavilion.com
 
 ## Template email
 
@@ -25,16 +25,16 @@ Pengujian sandbox Edu Pavilion (commcode sandbox SGWMILENIALBEKARYASO) sudah sel
 Kami mengajukan aktivasi production dengan server baru. Berikut datanya:
 
 A. DATA DARI EDU PAVILION
-1. Domain production      : https://<domain-production>
-2. IP server production   : <IP publik server>   (mohon di-whitelist untuk seluruh API)
+1. Domain production      : https://edupavilion.com
+2. IP server production   : 103.245.39.23   (mohon di-whitelist untuk seluruh API)
 3. Public key merchant    : terlampir (RSA 2048, SHA256withRSA)
 4. URL callback Payment Gateway
-   - Inquiry              : https://<domain-production>/payments/espay/v1.0/transfer-va/inquiry
-   - Payment Notification : https://<domain-production>/payments/espay/v1.0/transfer-va/payment
+   - Inquiry              : https://edupavilion.com/payments/espay/v1.0/transfer-va/inquiry
+   - Payment Notification : https://edupavilion.com/payments/espay/v1.0/transfer-va/payment
 5. URL callback Disbursement
-   - Transfer Confirmation: https://<domain-production>/payments/espay/v1.0/transfer/confirmation
-   - Transfer Notification: https://<domain-production>/payments/espay/v1.0/transfer/notification
-6. Email Customer Service : <email CS>
+   - Transfer Confirmation: https://edupavilion.com/payments/espay/v1.0/transfer/confirmation
+   - Transfer Notification: https://edupavilion.com/payments/espay/v1.0/transfer/notification
+6. Email Customer Service : info@edupavilion.com (WhatsApp +62 852-8145-5797)
 
 B. SERVICE YANG DIGUNAKAN
 Payment Gateway : Inquiry, Payment, QRIS (QR-MPM), Virtual Account (Send Invoice / VA Static Open),
@@ -61,8 +61,8 @@ C. DATA YANG KAMI MOHON DARI ESPAY
 Terima kasih.
 
 Salam,
-<nama>
-Edu Pavilion
+[Nama penanggung jawab]
+CV Generasi Milenial Bekarya (Edu Pavilion)
 ```
 
 ## Setelah Espay membalas

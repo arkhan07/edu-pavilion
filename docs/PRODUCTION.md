@@ -1,14 +1,25 @@
-# Tutorial Pindah ke Production (Server & IP Baru)
+# Tutorial Pindah ke Production - edupavilion.com
 
-Panduan ini untuk memindahkan integrasi Espay dari **staging (sandbox)** ke **server production** yang domain dan IP-nya berbeda.
+Panduan ini untuk memindahkan integrasi Espay dari **staging (sandbox)** ke **server production Edu Pavilion**.
 Ikuti urutannya: server disiapkan dulu (supaya IP dan URL callback sudah pasti dan bisa diakses), baru follow-up ke Espay.
+
+**Data server production**
+
+| Item | Nilai |
+|---|---|
+| Domain | `https://edupavilion.com` |
+| IP publik server | `103.245.39.23` |
+| Panel & web server | Webmin/Virtualmin, Apache |
+| Folder aplikasi | `/home/edupavilion/public_html/lms` |
+| User pemilik aplikasi | `edupavilion` |
+| Email / WhatsApp Customer Service | `info@edupavilion.com` / +62 852-8145-5797 |
 
 ## 0. Apa saja yang berubah?
 
 | Item | Staging (sandbox) | Production | Siapa yang mengubah |
 |---|---|---|---|
-| Domain / URL callback | `https://work.ayoo.web.id/...` | `https://<domain-production>/...` | Kita kirim ke Espay, Espay mendaftarkan |
-| IP server (whitelist di Espay) | `72.61.210.19` | IP publik server production | Kita kirim, Espay whitelist |
+| Domain / URL callback | `https://work.ayoo.web.id/...` | `https://edupavilion.com/...` | Kita kirim ke Espay, Espay mendaftarkan |
+| IP server (whitelist di Espay) | `72.61.210.19` | `103.245.39.23` | Kita kirim, Espay whitelist |
 | Merchant code, API key, signature key, password | kredensial sandbox | kredensial production (dari Espay) | Espay memberi, kita isi di Admin Panel |
 | Private/public key merchant (RSA) | sample key dokumentasi Espay | **pasangan kunci baru** | Kita buat, public key dikirim ke Espay |
 | Public key Espay | key sandbox | key production Espay | Espay memberi |
@@ -23,92 +34,110 @@ Ikuti urutannya: server disiapkan dulu (supaya IP dan URL callback sudah pasti d
 
 ## 1. Siapkan server production
 
+Semua perintah dijalankan di folder aplikasi sebagai user `edupavilion` (bukan root):
+```bash
+cd /home/edupavilion/public_html/lms
+```
+
 ### 1.1 Deploy kode
-1. Pastikan aplikasi production sudah berisi semua file di repo ini (salin dengan struktur folder yang sama).
-2. Dependensi: `barryvdh/laravel-dompdf` (sudah ada di `composer.json` Rocket LMS) lalu `composer install --no-dev -o`.
-3. Jalankan migrasi (membuat tabel `espay_virtual_accounts`, `espay_va_payments`, kolom provider di `payouts`, dan mendaftarkan channel **Espay** di Admin > Settings > Financial > Payment Gateways dalam status nonaktif):
+1. Salin **seluruh** isi repo ini ke `/home/edupavilion/public_html/lms` dengan struktur folder yang sama
+   (jangan satu per satu: file CSS/JS/gambar di `public/` sering terlewat).
+2. Dependensi: `barryvdh/laravel-dompdf` (sudah ada di `composer.json` Rocket LMS), lalu `composer install --no-dev -o`.
+3. Cek migrasi yang belum jalan, lalu jalankan **hanya migrasi Espay** dengan `--path` (supaya migrasi lain yang tertunda tidak ikut jalan):
    ```bash
-   php artisan migrate --force
+   php artisan migrate:status | grep -i "2026_10"
+   php artisan migrate --force --path=database/migrations/2026_10_05_000001_add_provider_columns_to_payouts_table.php
+   php artisan migrate --force --path=database/migrations/2026_10_05_000002_create_espay_virtual_accounts_tables.php
+   php artisan migrate --force --path=database/migrations/2026_10_06_000001_add_payment_ref_to_espay_va_payments.php
+   php artisan migrate --force --path=database/migrations/2026_10_10_000001_add_espay_payment_channel.php
    ```
+   Migrasi terakhir mendaftarkan channel **Espay** di Admin > Pengaturan > Keuangan > Payment Gateways (status nonaktif).
 4. Bersihkan cache:
    ```bash
    php artisan optimize:clear
    ```
+5. Pastikan aset ikut ter-upload (harus `200` dengan tipe `text/css` / `image/svg+xml`, bukan `text/html`):
+   ```bash
+   curl -s -o /dev/null -w "%{http_code} %{content_type}\n" https://edupavilion.com/assets/default/css/espay-checkout.css
+   curl -s -o /dev/null -w "%{http_code} %{content_type}\n" https://edupavilion.com/assets/default/img/payment/espay.svg
+   ```
 
 ### 1.2 `.env`
-- `APP_URL=https://<domain-production>` (dipakai untuk URL callback & link).
+- `APP_URL=https://edupavilion.com` (dipakai untuk URL callback & link).
 - `APP_ENV=production`, `APP_DEBUG=false`.
 - Variabel Espay: lihat [env.espay.example](env.espay.example). Disarankan mengisi kredensial lewat **Admin Panel** (langkah 4), `.env` cukup `ESPAY_IS_PRODUCTION=true`.
 
 ### 1.3 Permission folder (penyebab error 500 di staging)
-Web server (user `www` di aaPanel) harus bisa menulis log & cache:
+Apache/PHP berjalan sebagai user `edupavilion`, jadi folder log & cache harus milik user itu:
 ```bash
-chown -R www:www storage bootstrap/cache
+chown -R edupavilion:edupavilion storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
 ```
-Jalankan perintah artisan sebagai `www` (atau `umask 002` bila memakai user lain yang satu grup), supaya file log harian
-tidak dimiliki user lain. Bila log tidak bisa ditulis, **semua callback Espay akan error 500**.
+Jangan menjalankan `php artisan` sebagai **root**: file log harian yang dibuat root tidak bisa ditulis aplikasi,
+dan **semua callback Espay akan error 500** (pernah terjadi di staging).
 
 ### 1.4 Cron (wajib)
-Antrean deposit, cek status payout dan cek pembayaran VA berjalan dari scheduler Laravel:
-```bash
-crontab -u www -e
-# tambahkan:
-* * * * * cd /www/wwwroot/<domain-production> && php artisan schedule:run >> /dev/null 2>&1
-```
-(Di aaPanel: Cron > Add Task > Shell Script, jalankan setiap 1 menit sebagai `www`.)
+Antrean deposit, cek status payout dan cek pembayaran VA berjalan dari scheduler Laravel.
+Di **Webmin > System > Scheduled Cron Jobs > Create a new scheduled cron job**:
 
-### 1.5 Nginx (aaPanel)
-aaPanel menambahkan `error_page 404 /404.html;` yang membuat respons JSON 404 dari callback (mis. `4042412`) berubah menjadi halaman HTML.
-Nonaktifkan di vhost production:
-```bash
-grep -n "error_page 404\|fastcgi_intercept_errors" /www/server/panel/vhost/nginx/<domain-production>.conf
-# beri tanda # pada baris "error_page 404 /404.html;" lalu:
-nginx -t && nginx -s reload
-```
+| Field | Isi |
+|---|---|
+| Execute cron job as | `edupavilion` |
+| Command | `cd /home/edupavilion/public_html/lms && php artisan schedule:run >> /dev/null 2>&1` |
+| When to execute | **Times and dates selected below**, lalu Minutes/Hours/Days/Months/Weekdays semuanya **All** (setiap menit) |
 
-### 1.6 Firewall, Cloudflare & SSL
-- Port 443 harus terbuka untuk IP Espay production (konfirmasi IP-nya ke Espay). Pastikan fail2ban / firewall aaPanel / ipset tidak memblokir.
-- Bila domain lewat Cloudflare: buat **WAF Custom Rule "Skip"** untuk path yang diawali `/payments/espay/` (matikan Bot Fight Mode / challenge untuk path itu).
-- Sertifikat SSL harus valid (Espay tidak memanggil URL dengan sertifikat tidak valid).
+Cek: `php artisan schedule:list` harus memuat `espay:va-sync` (5 menit) dan `espay:payout-sync` (10 menit).
+Bila PHP default bukan 8.1+, ganti `php` dengan path lengkap (mis. `/usr/bin/php8.2`).
 
-### 1.7 Catat data server
+### 1.5 Apache / .htaccess
+- Pastikan request ke `/payments/espay/...` diteruskan ke Laravel (`public/.htaccess` bawaan Laravel) dan **tidak** ada
+  `ErrorDocument 404` yang mengganti respons JSON 404 dari callback (mis. `4042412`) menjadi halaman HTML.
+- Header `X-SIGNATURE`, `X-TIMESTAMP`, `X-PARTNER-ID`, `X-EXTERNAL-ID`, `CHANNEL-ID` harus sampai ke PHP (bawaan Apache sudah meneruskan).
+- Bila memakai ModSecurity, buat pengecualian untuk path `/payments/espay/` agar callback Espay tidak terblokir.
+
+### 1.6 Firewall & SSL
+- Port 443 harus terbuka untuk IP Espay production (konfirmasi IP-nya ke Espay). Pastikan fail2ban / firewall (Webmin > Networking) tidak memblokir.
+- Sertifikat SSL `edupavilion.com` harus valid (Espay tidak memanggil URL dengan sertifikat tidak valid).
+
+### 1.7 Cek koneksi server ke Espay
 ```bash
-# IP publik IPv4 server (aplikasi memaksa koneksi IPv4 ke Espay)
+# IP publik IPv4 server (aplikasi memaksa koneksi IPv4 ke Espay) - harus 103.245.39.23
 curl -4 -s ifconfig.me ; echo
-# Server bisa menjangkau Espay?
 curl -4 -s -o /dev/null -w "api-merchant: %{http_code}\n" https://api-merchant.espay.id
 curl -4 -s -o /dev/null -w "api: %{http_code}\n" https://api.espay.id
 ```
+Bila IP keluar (outbound) berbeda dari `103.245.39.23`, kirim IP hasil perintah di atas ke Espay untuk whitelist.
 
 ### 1.8 Pastikan URL callback bisa diakses dari internet
 Request dengan signature salah harus dijawab **JSON 401** (bukan HTML, bukan 404/500):
 ```bash
-D=https://<domain-production>
+D=https://edupavilion.com
 curl -s -X POST $D/payments/espay/v1.0/transfer-va/payment -H "Content-Type: application/json" -H "X-TIMESTAMP: 2026-01-01T00:00:00+07:00" -H "X-SIGNATURE: tes" -H "X-PARTNER-ID: tes" -H "X-EXTERNAL-ID: 123" -H "CHANNEL-ID: ESPAY" -d '{}' -w "\nHTTP %{http_code}\n"
 curl -s -X POST $D/payments/espay/v1.0/transfer/confirmation -H "Content-Type: application/json" -H "X-TIMESTAMP: 2026-01-01T00:00:00+07:00" -H "X-SIGNATURE: tes" -H "X-PARTNER-ID: tes" -H "X-EXTERNAL-ID: 123" -H "CHANNEL-ID: ESPAY" -d '{}' -w "\nHTTP %{http_code}\n"
 ```
+Status 10-10-2026: keempat endpoint (`transfer-va/inquiry`, `transfer-va/payment`, `transfer/confirmation`, `transfer/notification`)
+sudah menjawab JSON 401 `Unauthorized Signature`, artinya siap didaftarkan ke Espay.
 Setiap request masuk tercatat di `storage/logs/espay-YYYY-MM-DD.log` sebagai `[SNAP IN]`.
 
 ---
 
 ## 2. Buat pasangan key production & kumpulkan data
 
-1. Login Admin > **Settings > Financial > Payment Channels > Espay > Edit**.
+1. Login Admin > **Pengaturan > Keuangan > Payment Gateways > Espay > Edit**.
 2. Di bagian **Production**, centang **Generate pasangan kunci baru saat disimpan (RSA 2048)**, lalu **Simpan**. Private key tersimpan terenkripsi di database.
    (Alternatif CLI: `php artisan espay:keys production` -> `storage/app/espay/production/`.)
-3. Salin **Public key merchant (production)** yang muncul di halaman itu.
-4. Siapkan daftar berikut untuk dikirim ke Espay:
+3. Salin **Public Key Merchant (production)** yang muncul di halaman itu.
+4. Data yang dikirim ke Espay:
 
 | Data | Nilai |
 |---|---|
-| IP publik server production | hasil langkah 1.7 |
+| IP publik server production | `103.245.39.23` |
 | Public key merchant production | hasil langkah 2.3 |
-| URL Inquiry | `https://<domain-production>/payments/espay/v1.0/transfer-va/inquiry` |
-| URL Payment Notification | `https://<domain-production>/payments/espay/v1.0/transfer-va/payment` |
-| URL Transfer Confirmation | `https://<domain-production>/payments/espay/v1.0/transfer/confirmation` |
-| URL Transfer Notification | `https://<domain-production>/payments/espay/v1.0/transfer/notification` |
-| Email Customer Service | email CS Edu Pavilion |
+| URL Inquiry | `https://edupavilion.com/payments/espay/v1.0/transfer-va/inquiry` |
+| URL Payment Notification | `https://edupavilion.com/payments/espay/v1.0/transfer-va/payment` |
+| URL Transfer Confirmation | `https://edupavilion.com/payments/espay/v1.0/transfer/confirmation` |
+| URL Transfer Notification | `https://edupavilion.com/payments/espay/v1.0/transfer/notification` |
+| Email Customer Service | `info@edupavilion.com` |
 
 ## 3. Follow-up ke Espay
 
@@ -116,7 +145,7 @@ Kirim email memakai template di **[FOLLOWUP-ESPAY.md](FOLLOWUP-ESPAY.md)**. Isin
 
 ## 4. Isi kredensial production di Admin Panel
 
-Admin > Payment Channels > Espay > Edit, bagian **Production**:
+Admin > Pengaturan > Keuangan > Payment Gateways > Espay > Edit, bagian **Production**:
 
 | Field | Isi dari |
 |---|---|
@@ -163,6 +192,8 @@ Untuk rollback cukup ubah Mode kembali ke Sandbox.
 | `4011801` / `4011701 Invalid Transfer Confirmation` | Espay tidak bisa memanggil URL Transfer Confirmation | Cek URL terdaftar, firewall, log `[SNAP IN]` |
 | `4000000 Bad Request` saat membuat QRIS | Callback Inquiry kita gagal / tidak terjangkau | Cek URL Inquiry & log |
 | Notifikasi VA tidak masuk, transaksi "Suspect" di Espay | Request Espay tidak sampai ke server | `tcpdump -ni any 'tcp port 443 and host <IP-Espay>'`, cek firewall; sementara itu `espay:va-sync` mengambil status |
-| Respons callback berupa HTML 404 | `error_page 404` di nginx aaPanel | Langkah 1.5 |
+| Respons callback berupa HTML 404 | `ErrorDocument 404` Apache / `error_page 404` nginx | Langkah 1.5 |
 | Semua request 500 (termasuk callback) | File log tidak bisa ditulis web server | Langkah 1.3 |
 | Inquiry Status disbursement HTTP 504 | Gangguan di sisi Espay | Laporkan ke Espay dengan log request |
+| Popup checkout berantakan (logo bank sangat besar) | `public/assets/default/css/espay-checkout.css` belum ter-upload | Langkah 1.1 no. 5 |
+| Espay tidak muncul di Payment Gateways | Baris channel belum ada di tabel `payment_channels` | Migrasi `2026_10_10_000001_add_espay_payment_channel.php` |
