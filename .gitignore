@@ -1,0 +1,9 @@
+.env
+.env.*
+!docs/env.espay.example
+*.pem
+*.key
+*.zip
+storage/
+vendor/
+node_modules/
